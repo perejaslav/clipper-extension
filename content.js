@@ -2609,6 +2609,14 @@ const turndownService = new TurndownService({
   codeBlockStyle: "fenced"
 });
 turndownService.use(gfm);
+turndownService.addRule('keepCustomElements', {
+  filter: function (node) {
+    return node.tagName && node.tagName.includes('-') || (node.hasAttribute && node.hasAttribute('data-component'));
+  },
+  replacement: function (content, node) {
+    return '\n' + content.trim() + '\n';
+  }
+});
 function getExt(node) {
   const match = node.outerHTML.match(/(highlight-source-|language-)[a-z]+/);
   if (match) return match[0].split("-").pop() || "";
@@ -2804,19 +2812,39 @@ function extract_from_document() {
   let html = article.content;
   html = html.replace(/(<!--.*?-->)/g, "");
   if (article.title.length > 0) {
-    const h2Regex = /<h2[^>]*>(.*?)<\/h2>/;
-    const match = html.match(h2Regex);
-    if (match && match[0].includes(article.title)) {
-      html = html.replace("<h2", "<h1").replace("</h2", "</h1");
-    } else {
-      html = `<h1>${article.title}</h1>
+    const normalizedTitle = article.title.replace(/\s+/g, ' ').trim().toLowerCase();
+    const strippedHtml = html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const titleAlreadyPresent = strippedHtml.startsWith(normalizedTitle) || strippedHtml.includes(normalizedTitle);
+    if (!titleAlreadyPresent) {
+      const h2Regex = /<h2[^>]*>(.*?)<\/h2>/;
+      const match = html.match(h2Regex);
+      if (match) {
+        html = html.replace("<h2", "<h1").replace("</h2", "</h1");
+      } else {
+        html = `<h1>${article.title}</h1>
 ${html}`;
+      }
     }
   }
 
   // Добавляем дополнительные секции (комментарии, related)
+  const articleTextLength = html.replace(/<[^>]+>/g, '').trim().length;
   const extraSections = findExtraContent(docSnapshot, html);
   for (const section of extraSections) {
+    // Контроль перегрузки комментариями
+    if (section.type === 'comments') {
+      const commentTextLen = section.html.replace(/<[^>]+>/g, '').trim().length;
+      // Если комментарии > 3x статьи — обрезаем до первых 15 <li>
+      if (commentTextLen > articleTextLength * 3) {
+        const limited = section.html.replace(/(<li[\s\S]*?)(<li)/, (m, p1) => {
+          const items = section.html.match(/<li[\s\S]*?<\/li>/g) || [];
+          return items.slice(0, 15).join('\n');
+        });
+        section.html = limited || section.html.slice(0, articleTextLength);
+      }
+      // Если статья пустая — комментарии не добавляем вообще
+      if (articleTextLength < 100) continue;
+    }
     html += `\n\n<hr>\n<h2>${section.title}</h2>\n${section.html}`;
   }
 
@@ -2833,6 +2861,91 @@ ${html}`;
           const textSample = child.textContent.trim().slice(0, 200);
           if (textSample.length >= 50 && html.includes(textSample)) continue;
           html += `\n\n${cleanExtraHTML(child)}`;
+        }
+      }
+    }
+  }
+
+  // Fallback для интерактивных виджетов (навигаторы, SPA-приложения)
+  const articleTextLen = html.replace(/<[^>]+>/g, '').trim().length;
+  let isSpaMode = false;
+  if (articleTextLen < 1000) {
+    const widgetSelectors = [
+      '[class*="navigator"]', '[id*="navigator"]',
+      '.travel-navigator', '[data-component="Navigator"]',
+      '[class*="widget"]', '[class*="app-content"]',
+      '[class*="calculator"]', '[class*="filter"]',
+      '[role="application"]', '[class*="interactive"]'
+    ];
+    for (const sel of widgetSelectors) {
+      try {
+        const widget = docSnapshot.querySelector(sel);
+        if (widget && widget.textContent.trim().length > 200) {
+          isSpaMode = true;
+          // Агрессивный сбор: если cleanExtraHTML дал мало текста — собираем заголовки вручную
+          let widgetHtml = cleanExtraHTML(widget);
+          const widgetText = widgetHtml.replace(/<[^>]+>/g, '').trim();
+          if (widgetText.length < 300) {
+            const headings = [];
+            widget.querySelectorAll('h3, h4, [class*="title"], [class*="heading"], dt, summary').forEach(el => {
+              const t = el.textContent.trim();
+              if (t.length > 2 && t.length < 200) headings.push(`### ${t}`);
+            });
+            if (headings.length > 0) {
+              widgetHtml = headings.join('\n\n') + '\n\n' + widgetHtml;
+            }
+          }
+          html = widgetHtml + '\n\n' + html;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    // Сбор JSON-стейта из скрытых скриптов (React/Next.js)
+    const nextDataScript = docSnapshot.querySelector('#__NEXT_DATA__, script[type="application/json"]');
+    if (nextDataScript) {
+      try {
+        const jsonData = JSON.parse(nextDataScript.textContent);
+        const jsonText = JSON.stringify(jsonData).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (jsonText.length > 200) {
+          html = `<!-- JSON State Data -->\n\`\`\`json\n${JSON.stringify(jsonData, null, 2).slice(0, 50000)}\n\`\`\`\n\n` + html;
+        }
+      } catch (_) {}
+    }
+
+    // Аварийный сбор ссылок и плоского текста из виджета
+    if (isSpaMode) {
+      const widget = docSnapshot.querySelector('[class*="navigator"], .travel-navigator, [class*="widget"], [data-component="Navigator"]');
+      if (widget) {
+        // Сбор ссылок
+        const baseHost = location.origin;
+        const backupLinks = [];
+        widget.querySelectorAll('a').forEach(a => {
+          const href = a.getAttribute('href');
+          const text = a.textContent.trim();
+          if (href && text && text.length > 3) {
+            const fullUrl = href.startsWith('http') ? href : baseHost + (href.startsWith('/') ? '' : '/') + href;
+            backupLinks.push(`- [${text}](${fullUrl})`);
+          }
+        });
+        if (backupLinks.length > 0) {
+          html += `\n\n### Доступные направления и подробные правила:\n` + backupLinks.join('\n');
+        }
+
+        // Плоский сбор текстовых узлов (заголовки, кнопки, счетчики)
+        let widgetTextContent = '';
+        widget.querySelectorAll('h2, h3, h4, button, [class*="title"], [class*="text"], .card').forEach(el => {
+          const text = el.textContent.trim().replace(/\s+/g, ' ');
+          if (text.length > 2) {
+            if (/^(H2|H3)$/.test(el.tagName) || (el.className && el.className.includes && el.className.includes('title'))) {
+              widgetTextContent += `\n\n## ${text}\n`;
+            } else {
+              widgetTextContent += `- ${text}\n`;
+            }
+          }
+        });
+        if (widgetTextContent.length > 100) {
+          html += `\n\n### Структура интерактивного контента:\n${widgetTextContent}`;
         }
       }
     }
@@ -2958,6 +3071,10 @@ function findExtraContent(doc, articleHtml) {
 
           const heading = el.querySelector('h2, h3, h4, [class*="title"], [class*="heading"], [aria-label*="comment"]');
           const title = heading ? heading.textContent.trim() : 'Комментарии';
+          // Очистка blockquote перед конвертацией — предотвращает склеивание строк
+          el.querySelectorAll('blockquote').forEach(bq => {
+            bq.outerHTML = ` (Цитата: ${bq.textContent.trim()}) `;
+          });
           sections.push({ type: 'comments', title, html: cleanExtraHTML(el) });
         }
       }

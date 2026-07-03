@@ -2582,9 +2582,6 @@ function cell(content, node) {
   return prefix + content + " |";
 }
 function tables(turndownService2) {
-  turndownService2.keep(function(node) {
-    return node.nodeName === "TABLE" && !isHeadingRow(node.rows[0]);
-  });
   for (var key in rules) turndownService2.addRule(key, rules[key]);
 }
 function taskListItems(turndownService2) {
@@ -2736,6 +2733,7 @@ ${parts.join("\n")}`;
   return { title, markdown };
 }
 function extract_from_document() {
+  const docSnapshot = document.cloneNode(true);
   const article = new readabilityExports.Readability(document, {
     keepClasses: true,
     debug: false,
@@ -2760,9 +2758,156 @@ function extract_from_document() {
 ${html}`;
     }
   }
+
+  // Добавляем дополнительные секции (комментарии, related)
+  const extraSections = findExtraContent(docSnapshot, html);
+  for (const section of extraSections) {
+    html += `\n\n<hr>\n<h2>${section.title}</h2>\n${section.html}`;
+  }
+
+  // Fallback: если Readability извлек мало текста — ищем каталог/сетку в оригинальном DOM
+  const plainText = html.replace(/<[^>]+>/g, '').trim();
+  if (plainText.length < 400) {
+    const containers = docSnapshot.querySelectorAll('main, article, #content, .content, .catalog, .products, .product-list, .product-grid, body');
+    for (const container of containers) {
+      const children = Array.from(container.children);
+      for (const child of children) {
+        if (isCatalogOrGridSection(child) && isValidTextSection(child, true)) {
+          const id = child.getAttribute('id');
+          if (id && html.includes(`id="${id}"`)) continue;
+          const textSample = child.textContent.trim().slice(0, 200);
+          if (textSample.length >= 50 && html.includes(textSample)) continue;
+          html += `\n\n${cleanExtraHTML(child)}`;
+        }
+      }
+    }
+  }
+
   let markdown = turndownService.turndown(html);
   markdown = markdown.replace(/\[\]\(#[^)]*\)/g, "");
   return { title: article.title, markdown };
+}
+function isValidTextSection(el, isFallbackMode = false) {
+  if (!el) return false;
+  const text = el.textContent.trim();
+  if (text.length < 100) return false;
+
+  const tag = el.tagName.toLowerCase();
+  if (["nav", "footer", "header", "aside", "form", "dialog"].includes(tag)) return false;
+  if (el.closest("nav, footer, header, aside, form")) return false;
+
+  const role = (el.getAttribute("role") || "").toLowerCase();
+  if (["navigation", "banner", "contentinfo", "complementary", "search", "menu"].includes(role)) return false;
+
+  const htmlLen = el.innerHTML.length;
+  if (htmlLen === 0 || htmlLen > 800000) return false;
+
+  const density = text.length / htmlLen;
+  const densityThreshold = isFallbackMode ? 0.05 : 0.12;
+  if (density < densityThreshold) return false;
+
+  const links = el.querySelectorAll("a").length;
+  const totalNodes = el.querySelectorAll("*").length + 1;
+  const linksThreshold = isFallbackMode ? 0.70 : 0.35;
+  if (links / totalNodes > linksThreshold) return false;
+
+  return true;
+}
+function isCatalogOrGridSection(el) {
+  if (!el) return false;
+  const classes = (el.className || '').toString().toLowerCase();
+  const id = (el.id || '').toLowerCase();
+  const keywords = ['catalog', 'products', 'grid', 'items', 'shop', 'category', 'goods', 'product-list', 'product-grid'];
+  const matchByKeyword = keywords.some(k => classes.includes(k) || id.includes(k));
+  if (matchByKeyword) return true;
+
+  // Проверка структуры: повторяющиеся карточки (картинка + ссылка)
+  const children = Array.from(el.children);
+  if (children.length < 3) return false;
+  const tagCounts = {};
+  for (const child of children) {
+    const key = child.tagName + '|' + (child.className || '').toString().trim().slice(0, 40);
+    tagCounts[key] = (tagCounts[key] || 0) + 1;
+  }
+  const hasRepeatingCards = Object.values(tagCounts).some(c => c >= 3);
+  if (!hasRepeatingCards) return false;
+
+  // Карточки должны содержать ссылки и картинки
+  const hasLinksAndImages = children.some(c => c.querySelector('a') && c.querySelector('img'));
+  return hasLinksAndImages;
+}
+const commentSelectors = [
+  '#comments', '.comments', '#comment-list', '.comment-list',
+  '.comments-list', '#disqus_thread', '.live-comments',
+  'section[class*="comment"]', 'div[class*="comment"]',
+  '#comments-component', '.article-comments', '.post-comments',
+  '[data-comments-container]', 'amp-live-list[id*="comments"]'
+];
+
+const relatedSelectors = [
+  '.related-posts', '.read-more', '.recommended-posts', '#related',
+  '.related-articles', '.see-also', '.suggested-articles',
+  'section[class*="related"]', 'div[class*="related"]',
+  'div[class*="recommended"]', '.another-posts', '.post-links',
+  '[data-analytics-label="related-articles"]'
+];
+
+function cleanExtraHTML(el) {
+  if (!el) return '';
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll('script, style, iframe, noscript').forEach(n => n.remove());
+  clone.querySelectorAll('*').forEach(node => {
+    Array.from(node.attributes).forEach(attr => {
+      if (attr.name.startsWith('on') || attr.name === 'style') node.removeAttribute(attr.name);
+    });
+  });
+  clone.querySelectorAll('table, tr, td, th').forEach(el => {
+    Array.from(el.attributes).forEach(attr => el.removeAttribute(attr.name));
+  });
+  clone.querySelectorAll('td p, th p').forEach(p => {
+    p.replaceWith(document.createTextNode(p.textContent));
+  });
+  return clone.outerHTML;
+}
+
+function findExtraContent(doc, articleHtml) {
+  const sections = [];
+
+  function alreadyInArticle(el) {
+    const id = el.getAttribute('id');
+    if (id && (articleHtml.includes(`id="${id}"`) || articleHtml.includes(`id='${id}'`))) return true;
+    const textSample = el.textContent.trim().slice(0, 200);
+    if (textSample.length < 50) return false;
+    return articleHtml.includes(textSample);
+  }
+
+  for (const sel of commentSelectors) {
+    try {
+      const elements = doc.querySelectorAll(sel);
+      for (const el of elements) {
+        if (isValidTextSection(el) && !alreadyInArticle(el)) {
+          const heading = el.querySelector('h2, h3, h4, [class*="title"], [class*="heading"], [aria-label*="comment"]');
+          const title = heading ? heading.textContent.trim() : 'Комментарии';
+          sections.push({ type: 'comments', title, html: cleanExtraHTML(el) });
+        }
+      }
+    } catch (_) {}
+  }
+
+  for (const sel of relatedSelectors) {
+    try {
+      const elements = doc.querySelectorAll(sel);
+      for (const el of elements) {
+        if (isValidTextSection(el) && !alreadyInArticle(el)) {
+          const heading = el.querySelector('h2, h3, h4, [class*="title"], [class*="heading"]');
+          const title = heading ? heading.textContent.trim() : 'Похожие материалы';
+          sections.push({ type: 'related', title, html: cleanExtraHTML(el) });
+        }
+      }
+    } catch (_) {}
+  }
+
+  return sections;
 }
 async function extract() {
   const twitterResult = await extract_tweets();

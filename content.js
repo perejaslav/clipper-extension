@@ -2745,14 +2745,40 @@ function extract_from_document() {
   // Удаление стандартных служебных блоков
   const utilitySelectors = [
     '.cookie-banner', '.cookie-notice', '[class*="cookie"]', '[id*="cookie"]',
-    '.quick-settings', '#quick-settings', '.product-tabs', '.nav-tabs'
+    '.quick-settings', '#quick-settings', '.product-tabs', '.nav-tabs',
+    '.newsletter-signup', '.newsletter-box', '[class*="newsletter"]', '[id*="newsletter"]',
+    '.membership-box', '.join-community', '[class*="plus-block"]', '.premium-rewards',
+    '.latest-news', '.trending-articles', '.more-from', '.latest-in',
+    '.recirc-wrapper', '[data-component="recirculation"]', '.sub-box',
+    'aside', '.sidebar', '.commercial-block', '.ad-wrapper',
+    '.share-buttons', '.social-share', '[class*="share-list"]', '.share-container'
   ];
   utilitySelectors.forEach(sel => docSnapshot.querySelectorAll(sel).forEach(el => el.remove()));
 
-  // Дополнительный поиск куки-баннеров по тексту
-  docSnapshot.querySelectorAll('div, section, p').forEach(el => {
-    if (el.textContent && (el.textContent.includes("файлы 'cookie'") || el.textContent.includes('файлы cookie'))) {
+  // Удаление служебных блоков по тексту (куки + маркетинг + auth-заглушки)
+  docSnapshot.querySelectorAll('div, section, form, p, li').forEach(el => {
+    if (!el.textContent) return;
+    const lower = el.textContent.toLowerCase();
+    if (
+      lower.includes("файлы 'cookie'") || lower.includes('файлы cookie') ||
+      lower.includes('sign up for the latest discoveries') ||
+      lower.includes('join our community') ||
+      lower.includes('delivered straight to your inbox') ||
+      lower.includes('become a member in seconds') ||
+      lower.includes('confirm your public display name') ||
+      lower.includes('please logout and then login') ||
+      lower.includes('you must be logged in to comment')
+    ) {
       el.remove();
+    }
+  });
+
+  // Удаление кнопок «Поделиться» (Copy link и т.д.)
+  docSnapshot.querySelectorAll('li, a').forEach(el => {
+    if (el.textContent && el.textContent.trim().toLowerCase() === 'copy link') {
+      const parentList = el.closest('ul, ol');
+      if (parentList) parentList.remove();
+      else el.remove();
     }
   });
 
@@ -2919,6 +2945,17 @@ function findExtraContent(doc, articleHtml) {
       const elements = doc.querySelectorAll(sel);
       for (const el of elements) {
         if (isValidTextSection(el) && !alreadyInArticle(el)) {
+          const lowerText = el.textContent.toLowerCase();
+          const authTriggers = [
+            'confirm your public display name',
+            'please logout and then login',
+            'you must be logged in to comment',
+            'войдите, чтобы оставить комментарий',
+            'sign in to comment'
+          ];
+          const isAuthNotice = authTriggers.some(phrase => lowerText.includes(phrase));
+          if (isAuthNotice && el.querySelectorAll('p, span').length < 3) continue;
+
           const heading = el.querySelector('h2, h3, h4, [class*="title"], [class*="heading"], [aria-label*="comment"]');
           const title = heading ? heading.textContent.trim() : 'Комментарии';
           sections.push({ type: 'comments', title, html: cleanExtraHTML(el) });

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Clipper",
-  "version": "1.2.2",
+  "version": "1.2.5",
   "description": "Извлекает контент страницы и конвертирует в Markdown",
   "permissions": ["activeTab", "downloads", "clipboardWrite"],
   "action": {

@@ -2734,6 +2734,35 @@ ${parts.join("\n")}`;
 }
 function extract_from_document() {
   const docSnapshot = document.cloneNode(true);
+
+  // Удаление элементов Clipper по ID корневых контейнеров и специфичным классам
+  const clipperSelectors = [
+    '#clipper-root', '[id*="clipper"]', '[class*="clipper"]',
+    '.clipper-panel', '.clipper-overlay', '.clipper-ui'
+  ];
+  clipperSelectors.forEach(sel => docSnapshot.querySelectorAll(sel).forEach(el => el.remove()));
+
+  // Удаление стандартных служебных блоков
+  const utilitySelectors = [
+    '.cookie-banner', '.cookie-notice', '[class*="cookie"]', '[id*="cookie"]',
+    '.quick-settings', '#quick-settings', '.product-tabs', '.nav-tabs'
+  ];
+  utilitySelectors.forEach(sel => docSnapshot.querySelectorAll(sel).forEach(el => el.remove()));
+
+  // Дополнительный поиск куки-баннеров по тексту
+  docSnapshot.querySelectorAll('div, section, p').forEach(el => {
+    if (el.textContent && (el.textContent.includes("файлы 'cookie'") || el.textContent.includes('файлы cookie'))) {
+      el.remove();
+    }
+  });
+
+  // Удаление внутренних якорных ссылок (табов) внутри навигации
+  docSnapshot.querySelectorAll('a[href^="#"]').forEach(link => {
+    if (link.closest('ul, ol, nav')) {
+      link.remove();
+    }
+  });
+
   const article = new readabilityExports.Readability(document, {
     keepClasses: true,
     debug: false,
@@ -2865,7 +2894,11 @@ function cleanExtraHTML(el) {
     Array.from(el.attributes).forEach(attr => el.removeAttribute(attr.name));
   });
   clone.querySelectorAll('td p, th p').forEach(p => {
-    p.replaceWith(document.createTextNode(p.textContent));
+    const cleanedText = p.textContent.replace(/\s+/g, ' ').trim();
+    p.replaceWith(document.createTextNode(cleanedText));
+  });
+  clone.querySelectorAll('td, th').forEach(cell => {
+    cell.textContent = cell.textContent.replace(/\s+/g, ' ').trim();
   });
   return clone.outerHTML;
 }

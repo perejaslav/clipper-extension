@@ -1,0 +1,17 @@
+# Clipper golden set — manual regression URLs
+# Capture baseline BEFORE optimization:
+#   1. Open URL in Chrome with Clipper loaded
+#   2. Click extension icon, wait for "Готово"
+#   3. Save markdown to tests/baseline/<slug>.md
+#   4. Optional: screenshot popup to tests/baseline/<slug>.png
+#
+# Fields: CATEGORY | URL | OUTPUT_SLUG
+
+article       | https://www.bbc.com/news | bbc-news
+tables        | https://en.wikipedia.org/wiki/Markdown | wikipedia-markdown
+spa-widget    | https://www.kayak.com/flights | kayak-flights
+twitter-tweet | https://x.com/naval/status/1002103360646823936 | x-naval-tweet
+twitter-profile | https://x.com/paulg | x-paulg-profile
+comments      | https://news.ycombinator.com/item?id=1 | hn-comments
+nextjs        | https://nextjs.org/docs | nextjs-docs
+catalog       | https://www.amazon.com/s?k=markdown+book | amazon-catalog

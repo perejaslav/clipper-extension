@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Clipper",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Извлекает контент страницы и конвертирует в Markdown",
   "permissions": ["activeTab", "downloads", "clipboardWrite", "scripting"],
   "action": {
@@ -14,7 +14,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["content.js"],
+      "resources": ["dist/content.js"],
       "matches": ["<all_urls>"]
     }
   ],

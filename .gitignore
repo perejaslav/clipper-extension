@@ -1,5 +1,5 @@
 node_modules/
-dist/
+legacy-content.js.monolith
 .DS_Store
 Thumbs.db
 *.log

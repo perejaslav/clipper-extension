@@ -9,7 +9,7 @@ async function ensureContentScript(tabId) {
   const inject = () =>
     chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content.js"],
+      files: ["dist/content.js"],
     });
   try {
     await inject();

@@ -1,3 +1,6 @@
+if (window.__clipperLoaded) {
+} else {
+window.__clipperLoaded = true;
 var Readability = { exports: {} };
 var hasRequiredReadability$1;
 function requireReadability$1() {
@@ -3130,3 +3133,5 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 );
+
+}

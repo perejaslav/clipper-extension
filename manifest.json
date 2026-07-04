@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Clipper",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Извлекает контент страницы и конвертирует в Markdown",
-  "permissions": ["activeTab", "downloads", "clipboardWrite"],
+  "permissions": ["activeTab", "downloads", "clipboardWrite", "scripting"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -12,10 +12,10 @@
       "128": "icons/icon128.png"
     }
   },
-  "content_scripts": [
+  "web_accessible_resources": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "resources": ["content.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "icons": {

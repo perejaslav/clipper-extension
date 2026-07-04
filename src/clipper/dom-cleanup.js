@@ -1,13 +1,10 @@
-const clipperSelectors = [
+const removalSelectors = [
   "#clipper-root",
   '[id*="clipper"]',
   '[class*="clipper"]',
   ".clipper-panel",
   ".clipper-overlay",
   ".clipper-ui",
-];
-
-const utilitySelectors = [
   ".cookie-banner",
   ".cookie-notice",
   '[class*="cookie"]',
@@ -56,10 +53,7 @@ const textRemovalPhrases = [
 export function prepareDocSnapshot(doc) {
   const docSnapshot = doc.cloneNode(true);
 
-  for (const sel of clipperSelectors) {
-    docSnapshot.querySelectorAll(sel).forEach((el) => el.remove());
-  }
-  for (const sel of utilitySelectors) {
+  for (const sel of removalSelectors) {
     docSnapshot.querySelectorAll(sel).forEach((el) => el.remove());
   }
 

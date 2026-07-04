@@ -2,6 +2,7 @@ import { Readability } from "@mozilla/readability";
 import { prepareDocSnapshot } from "./dom-cleanup.js";
 import { cleanExtraHTML, findExtraContent } from "./extra-content.js";
 import { generateFrontmatter } from "./frontmatter.js";
+import { stripHtmlText } from "./html-utils.js";
 import { htmlToMarkdown } from "./turndown-config.js";
 import { isCatalogOrGridSection, isValidTextSection } from "./validators.js";
 
@@ -21,11 +22,7 @@ const widgetSelectors = [
 function ensureArticleTitle(html, title) {
   if (!title.length) return html;
   const normalizedTitle = title.replace(/\s+/g, " ").trim().toLowerCase();
-  const strippedHtml = html
-    .replace(/<[^>]+>/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+  const strippedHtml = stripHtmlText(html).replace(/\s+/g, " ").toLowerCase();
   const titleAlreadyPresent =
     strippedHtml.startsWith(normalizedTitle) ||
     strippedHtml.includes(normalizedTitle);
@@ -39,29 +36,31 @@ function ensureArticleTitle(html, title) {
 }
 
 function appendExtraSections(html, docSnapshot) {
-  const articleTextLength = html.replace(/<[^>]+>/g, "").trim().length;
+  const articleTextLength = stripHtmlText(html).length;
   const extraSections = findExtraContent(docSnapshot, html);
   let result = html;
   for (const section of extraSections) {
+    let sectionHtml = section.html;
     if (section.type === "comments") {
-      const commentTextLen = section.html.replace(/<[^>]+>/g, "").trim().length;
+      const commentTextLen = stripHtmlText(sectionHtml).length;
       if (commentTextLen > articleTextLength * 3) {
-        const items = section.html.match(/<li[\s\S]*?<\/li>/g) || [];
-        section.html = items.slice(0, 15).join("\n") || section.html.slice(0, articleTextLength);
+        const items = sectionHtml.match(/<li[\s\S]*?<\/li>/g) || [];
+        sectionHtml =
+          items.slice(0, 15).join("\n") ||
+          sectionHtml.slice(0, articleTextLength);
       }
       if (articleTextLength < 100) continue;
     }
-    result += `\n\n<hr>\n<h2>${section.title}</h2>\n${section.html}`;
+    result += `\n\n<hr>\n<h2>${section.title}</h2>\n${sectionHtml}`;
   }
   return result;
 }
 
 function applyCatalogFallback(html, docSnapshot) {
-  const plainText = html.replace(/<[^>]+>/g, "").trim();
-  if (plainText.length >= 400) return html;
+  if (stripHtmlText(html).length >= 400) return html;
   let result = html;
   const containers = docSnapshot.querySelectorAll(
-    "main, article, #content, .content, .catalog, .products, .product-list, .product-grid, body"
+    "main, article, #content, .content, .catalog, .products, .product-list, .product-grid, body",
   );
   for (const container of containers) {
     for (const child of Array.from(container.children)) {
@@ -89,21 +88,64 @@ function findSpaWidget(docSnapshot) {
   return null;
 }
 
+function appendWidgetBackupContent(result, widget) {
+  const baseHost = location.origin;
+  const backupLinks = [];
+  widget.querySelectorAll("a").forEach((a) => {
+    const href = a.getAttribute("href");
+    const text = a.textContent.trim();
+    if (href && text && text.length > 3) {
+      const fullUrl = href.startsWith("http")
+        ? href
+        : baseHost + (href.startsWith("/") ? "" : "/") + href;
+      backupLinks.push(`- [${text}](${fullUrl})`);
+    }
+  });
+  if (backupLinks.length > 0) {
+    result +=
+      `\n\n### Доступные направления и подробные правила:\n` +
+      backupLinks.join("\n");
+  }
+
+  let widgetTextContent = "";
+  widget
+    .querySelectorAll(
+      'h2, h3, h4, button, [class*="title"], [class*="text"], .card',
+    )
+    .forEach((el) => {
+      const text = el.textContent.trim().replace(/\s+/g, " ");
+      if (text.length > 2) {
+        if (
+          /^(H2|H3)$/.test(el.tagName) ||
+          (el.className &&
+            el.className.includes &&
+            el.className.includes("title"))
+        ) {
+          widgetTextContent += `\n\n## ${text}\n`;
+        } else {
+          widgetTextContent += `- ${text}\n`;
+        }
+      }
+    });
+  if (widgetTextContent.length > 100) {
+    result += `\n\n### Структура интерактивного контента:\n${widgetTextContent}`;
+  }
+  return result;
+}
+
 function applySpaFallback(html, docSnapshot) {
-  const articleTextLen = html.replace(/<[^>]+>/g, "").trim().length;
-  if (articleTextLen >= 1000) return html;
+  if (stripHtmlText(html).length >= 1000) return html;
 
   let result = html;
   const widget = findSpaWidget(docSnapshot);
 
   if (widget) {
     let widgetHtml = cleanExtraHTML(widget);
-    const widgetText = widgetHtml.replace(/<[^>]+>/g, "").trim();
-    if (widgetText.length < 300) {
+    if (stripHtmlText(widgetHtml).length < 300) {
       const headings = [];
       widget
         .querySelectorAll(
-          'h3, h4, [class*="title"], [class*="heading"], dt, summary'
+          'h3, h4, [class*="title"], [class*="heading"], dt, summary',
         )
         .forEach((el) => {
           const t = el.textContent.trim();
@@ -114,10 +156,11 @@ function applySpaFallback(html, docSnapshot) {
       }
     }
     result = widgetHtml + "\n\n" + result;
+    result = appendWidgetBackupContent(result, widget);
   }
 
   const nextDataScript = docSnapshot.querySelector(
-    '#__NEXT_DATA__, script[type="application/json"]'
+    '#__NEXT_DATA__, script[type="application/json"]',
   );
   if (nextDataScript) {
     try {
@@ -132,50 +175,6 @@ function applySpaFallback(html, docSnapshot) {
           result;
       }
     } catch (_) {}
-  }
-
-  if (widget) {
-    const baseHost = location.origin;
-    const backupLinks = [];
-    widget.querySelectorAll("a").forEach((a) => {
-      const href = a.getAttribute("href");
-      const text = a.textContent.trim();
-      if (href && text && text.length > 3) {
-        const fullUrl = href.startsWith("http")
-          ? href
-          : baseHost + (href.startsWith("/") ? "" : "/") + href;
-        backupLinks.push(`- [${text}](${fullUrl})`);
-      }
-    });
-    if (backupLinks.length > 0) {
-      result +=
-        `\n\n### Доступные направления и подробные правила:\n` +
-        backupLinks.join("\n");
-    }
-
-    let widgetTextContent = "";
-    widget
-      .querySelectorAll(
-        'h2, h3, h4, button, [class*="title"], [class*="text"], .card'
-      )
-      .forEach((el) => {
-        const text = el.textContent.trim().replace(/\s+/g, " ");
-        if (text.length > 2) {
-          if (
-            /^(H2|H3)$/.test(el.tagName) ||
-            (el.className &&
-              el.className.includes &&
-              el.className.includes("title"))
-          ) {
-            widgetTextContent += `\n\n## ${text}\n`;
-          } else {
-            widgetTextContent += `- ${text}\n`;
-          }
-        }
-      });
-    if (widgetTextContent.length > 100) {
-      result += `\n\n### Структура интерактивного контента:\n${widgetTextContent}`;
-    }
   }
 
   return result;

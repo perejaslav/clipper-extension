@@ -1,36 +1,56 @@
 import { isValidTextSection } from "./validators.js";
 
-const commentSelectors = [
-  "#comments",
-  ".comments",
-  "#comment-list",
-  ".comment-list",
-  ".comments-list",
-  "#disqus_thread",
-  ".live-comments",
-  'section[class*="comment"]',
-  'div[class*="comment"]',
-  "#comments-component",
-  ".article-comments",
-  ".post-comments",
-  "[data-comments-container]",
-  'amp-live-list[id*="comments"]',
-];
-
-const relatedSelectors = [
-  ".related-posts",
-  ".read-more",
-  ".recommended-posts",
-  "#related",
-  ".related-articles",
-  ".see-also",
-  ".suggested-articles",
-  'section[class*="related"]',
-  'div[class*="related"]',
-  'div[class*="recommended"]',
-  ".another-posts",
-  ".post-links",
-  '[data-analytics-label="related-articles"]',
+const sectionConfigs = [
+  {
+    selectors: [
+      "#comments",
+      ".comments",
+      "#comment-list",
+      ".comment-list",
+      ".comments-list",
+      "#disqus_thread",
+      ".live-comments",
+      'section[class*="comment"]',
+      'div[class*="comment"]',
+      "#comments-component",
+      ".article-comments",
+      ".post-comments",
+      "[data-comments-container]",
+      'amp-live-list[id*="comments"]',
+    ],
+    type: "comments",
+    defaultTitle: "Комментарии",
+    headingSelector:
+      'h2, h3, h4, [class*="title"], [class*="heading"], [aria-label*="comment"]',
+    authTriggers: [
+      "confirm your public display name",
+      "please logout and then login",
+      "you must be logged in to comment",
+      "войдите, чтобы оставить комментарий",
+      "sign in to comment",
+    ],
+    transformBlockquotes: true,
+  },
+  {
+    selectors: [
+      ".related-posts",
+      ".read-more",
+      ".recommended-posts",
+      "#related",
+      ".related-articles",
+      ".see-also",
+      ".suggested-articles",
+      'section[class*="related"]',
+      'div[class*="related"]',
+      'div[class*="recommended"]',
+      ".another-posts",
+      ".post-links",
+      '[data-analytics-label="related-articles"]',
+    ],
+    type: "related",
+    defaultTitle: "Похожие материалы",
+    headingSelector: 'h2, h3, h4, [class*="title"], [class*="heading"]',
+  },
 ];
 
 export function cleanExtraHTML(el) {
@@ -47,7 +67,7 @@ export function cleanExtraHTML(el) {
   });
   clone.querySelectorAll("table, tr, td, th").forEach((tableEl) => {
     Array.from(tableEl.attributes).forEach((attr) =>
-      tableEl.removeAttribute(attr.name)
+      tableEl.removeAttribute(attr.name),
     );
   });
   clone.querySelectorAll("td p, th p").forEach((p) => {
@@ -75,50 +95,40 @@ export function findExtraContent(doc, articleHtml) {
     return articleHtml.includes(textSample);
   }
 
-  for (const sel of commentSelectors) {
-    try {
-      const elements = doc.querySelectorAll(sel);
-      for (const el of elements) {
-        if (isValidTextSection(el) && !alreadyInArticle(el)) {
-          const lowerText = el.textContent.toLowerCase();
-          const authTriggers = [
-            "confirm your public display name",
-            "please logout and then login",
-            "you must be logged in to comment",
-            "войдите, чтобы оставить комментарий",
-            "sign in to comment",
-          ];
-          const isAuthNotice = authTriggers.some((phrase) =>
-            lowerText.includes(phrase)
-          );
-          if (isAuthNotice && el.querySelectorAll("p, span").length < 3) continue;
+  for (const config of sectionConfigs) {
+    for (const sel of config.selectors) {
+      try {
+        const elements = doc.querySelectorAll(sel);
+        for (const el of elements) {
+          if (!isValidTextSection(el) || alreadyInArticle(el)) continue;
 
-          const heading = el.querySelector(
-            'h2, h3, h4, [class*="title"], [class*="heading"], [aria-label*="comment"]'
-          );
-          const title = heading ? heading.textContent.trim() : "Комментарии";
-          el.querySelectorAll("blockquote").forEach((bq) => {
-            bq.outerHTML = ` (Цитата: ${bq.textContent.trim()}) `;
+          if (config.authTriggers) {
+            const lowerText = el.textContent.toLowerCase();
+            const isAuthNotice = config.authTriggers.some((phrase) =>
+              lowerText.includes(phrase),
+            );
+            if (isAuthNotice && el.querySelectorAll("p, span").length < 3)
+              continue;
+          }
+
+          if (config.transformBlockquotes) {
+            el.querySelectorAll("blockquote").forEach((bq) => {
+              bq.outerHTML = ` (Цитата: ${bq.textContent.trim()}) `;
+            });
+          }
+
+          const heading = el.querySelector(config.headingSelector);
+          const title = heading
+            ? heading.textContent.trim()
+            : config.defaultTitle;
+          sections.push({
+            type: config.type,
+            title,
+            html: cleanExtraHTML(el),
           });
-          sections.push({ type: "comments", title, html: cleanExtraHTML(el) });
         }
-      }
-    } catch (_) {}
-  }
-
-  for (const sel of relatedSelectors) {
-    try {
-      const elements = doc.querySelectorAll(sel);
-      for (const el of elements) {
-        if (isValidTextSection(el) && !alreadyInArticle(el)) {
-          const heading = el.querySelector(
-            'h2, h3, h4, [class*="title"], [class*="heading"]'
-          );
-          const title = heading ? heading.textContent.trim() : "Похожие материалы";
-          sections.push({ type: "related", title, html: cleanExtraHTML(el) });
-        }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
   }
 
   return sections;

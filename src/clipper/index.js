@@ -7,8 +7,7 @@ async function extract() {
   return extractFromDocument();
 }
 
-if (window.__clipperLoaded) {
-} else {
+if (!window.__clipperLoaded) {
   window.__clipperLoaded = true;
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.action === "extract") {
